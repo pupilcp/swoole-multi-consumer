@@ -109,7 +109,7 @@ return [
     ],
 ];
 ```
-#### 备注：也可以将queueConfig.php结构的内容存储到mysql、es、redis等存储服务，通过\Pupilcp\Service\Test中loadQueueConfig方法进行加载即可。smc-server会检测此回调方法，实现队列配置热加载。
+备注：也可以将queueConfig.php(queueConfig.demo.php重命名)结构的内容存储到mysql、es、redis等存储服务，通过\Pupilcp\Service\Test中loadQueueConfig方法进行加载即可。smc-server会检测此回调方法，实现队列配置热加载。
 
 ### 启动smc-server，以Yii2框架为示例
 1. 使用Yii2框架自带的console。

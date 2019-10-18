@@ -1,7 +1,7 @@
 ## PHP版本  swoole-multi-consumer
 
 ### 简介
-swoole-multi-consumer（简称smc-server）使用PHP实现，使用swoole多进程消费者订阅消息，实现自动监控队列的数量，自动伸缩消费者数量，目前暂时支持rabbitmq。
+swoole-multi-consumer（简称smc-server）使用PHP实现，使用swoole多进程消费者订阅消息，实现自动监控队列的数量，自动伸缩消费者数量，并实现核心配置文件的热加载，目前暂时支持rabbitmq。
 
 ### 说明
 业务功能的实现都在自身的PHP项目中，smc-server通过方法回调[PHP项目中的方法]进行队列消息的处理和配置文件热加载

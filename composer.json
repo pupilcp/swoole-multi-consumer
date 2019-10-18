@@ -1,0 +1,23 @@
+{
+    "name": "pupilcp/swoole-multi-consumer",
+    "description": "使用swoole多进程消费者订阅消息，实现自动监控队列的数量，自行增加/减少消费者",
+    "keywords": ["swoole","rabbitmq", "多进程消费","订阅消息","自动伸缩消费者"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "pupilcp",
+            "email": "310976780@qq.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.0",
+        "ext-swoole": ">=1.10.0",
+        "ext-redis": ">=3.0",
+        "ext-amqp": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Pupilcp\\": "src"
+        }
+    }
+}

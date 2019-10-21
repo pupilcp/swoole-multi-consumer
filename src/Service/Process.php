@@ -37,8 +37,6 @@ class Process
      */
     public function run()
     {
-		\Pupilcp\Service\Notice::getInstance()->notice(['title' => 'text' ,'content' => 'dsdfsdfsfdf']);
-		exit();
         $this->initConsumers();
         $this->registerSignal();
         $this->registerTimer();

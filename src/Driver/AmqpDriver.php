@@ -47,8 +47,12 @@ class AmqpDriver implements MessageDriver
         try {
             $this->amqp->getConnection();
             $this->amqp->consume(function (\AMQPEnvelope $envelope, \AMQPQueue $queue) use ($callbackConf) {
-                call_user_func_array($callbackConf, [$envelope->getBody()]);
-                $queue->ack($envelope->getDeliveryTag());
+            	try{
+					call_user_func_array($callbackConf, [$envelope->getBody()]);
+					$queue->ack($envelope->getDeliveryTag());
+				}catch (\Throwable $e){
+					Smc::$logger->log($e->getMessage() . $e->getTraceAsString(), Logger::LEVEL_ERROR);
+				}
             }, $queueConf);
         } catch (\Throwable $e) {
             Smc::$logger->log($e->getMessage() . $e->getTraceAsString(), Logger::LEVEL_ERROR);
@@ -61,10 +65,6 @@ class AmqpDriver implements MessageDriver
      */
     public function unsubscribe()
     {
-		for ($i = 1; $i <= 100; $i++) {
-			$this->amqp->getConnection();
-			$this->amqp->publish('php.amqp.ext', 'dis_routekey', time());
-        }
         // TODO: Implement unsubscribe() method.
     }
 

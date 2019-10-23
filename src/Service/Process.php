@@ -115,7 +115,6 @@ class Process
                 $consumer->consume($queueConf['callback'], $queueConf ?? null);
             } catch (\Throwable $e) {
                 Smc::$logger->log($e->getMessage() . $e->getTraceAsString(), Logger::LEVEL_ERROR);
-                throw $e;
             }
         }, false, false);
         $pid                                    = $process->start();
@@ -173,8 +172,8 @@ class Process
                     \Swoole\Process::kill($this->timerPid, $signo);
                 }
                 $msg = sprintf('smc-server接收到信号：%s，master主进程：%d退出' . PHP_EOL, $signo, $this->mpid);
-				Smc::$logger->log($msg);
-				if (class_exists(\Swoole\ExitException::class)) {
+                Smc::$logger->log($msg);
+                if (class_exists(\Swoole\ExitException::class)) {
                     throw new \Swoole\ExitException($msg);
                 } else {
                     exit();
@@ -359,7 +358,9 @@ class Process
                 $config = call_user_func_array(Smc::getGlobalConfig()['global']['queueCfgCallback'], []);
                 $configJson = json_encode($config);
                 if ($configJson && !Smc::cmpConfigHash($configJson)) {
-                    Smc::$logger->log('系统检测到队列配置发生变化，重启子进程');
+                    $msg = 'smc-server检测到队列配置发生变化，系统将重启子进程';
+                    Smc::$logger->log($msg);
+                    Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
                     //配置发生变化，重新加载配置，并重启子进程
                     Smc::setConfigHash($configJson);
                     $this->exitSmcServer(SIGTERM, false);

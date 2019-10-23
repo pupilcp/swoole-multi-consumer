@@ -36,7 +36,6 @@ swoole-multi-consumer（简称smc-server）使用PHP实现，使用swoole多进�
 ```
 define('SMC_AMQP_CONSUME', 1); //rabbitmq
 define('SMC_REDIS_CONSUME', 2); //redis
-define('SMC_SERVER_VERSION', '1.0.0');
 define('SMC_MESSAGE_DRIVER', SMC_AMQP_CONSUME); //消息驱动， 1.0.0暂时仅仅支持rabbitmq
 
 return [

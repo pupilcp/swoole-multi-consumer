@@ -8,6 +8,7 @@
 
 namespace Pupilcp\Service;
 
+use Pupilcp\App;
 use Pupilcp\Log\Logger;
 use Pupilcp\Smc;
 
@@ -399,7 +400,7 @@ class Process
     private function getSmcServcerStatus($worker)
     {
         $statusInfo  = PHP_EOL;
-        $statusInfo .= 'AppName: Swoole-Multi-Consumer Version: ' . SMC_SERVER_VERSION . PHP_EOL;
+        $statusInfo .= 'AppName: Swoole-Multi-Consumer Version: ' . App::SMC_SERVER_VERSION . PHP_EOL;
         $statusInfo .= 'PHP Version:' . PHP_VERSION . '    Swoole Version: ' . SWOOLE_VERSION . PHP_EOL;
         $statusInfo .= Utils::getSysLoadAvg() . '   Memory Used:' . Utils::getServerMemoryUsage() . PHP_EOL;
         $statusInfo .= 'StartTime : ' . date('Y-m-d H:i:s', $this->startTime) . '   Run ' . floor((time() - $this->startTime) / (24 * 60 * 60)) . ' Days ' . floor(((time() - $this->startTime) % (24 * 60 * 60)) / (60 * 60)) . ' Hours ' . floor(((time() - $this->startTime) % 3600) / 60) . ' Minutes ' . PHP_EOL;

@@ -13,6 +13,8 @@ use Pupilcp\Service\Process;
 
 class App
 {
+	const SMC_SERVER_VERSION = '1.0.3';
+
     /**
      * App constructor.
      *

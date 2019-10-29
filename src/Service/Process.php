@@ -382,7 +382,9 @@ class Process
     {
         \Swoole\Timer::tick($this->smcServerStatusTime * 1000, function ($timerId, $worker) {
             if (!$this->checkMasterProcess()) {
-                Smc::$logger->log(sprintf('检测到主进程：%d不存在，强制退出子进程', $this->mpid), Logger::LEVEL_ERROR);
+            	$msg = sprintf('【Error】检测到主进程：%d不存在，强制退出子进程', $this->mpid);
+                Smc::$logger->log($msg, Logger::LEVEL_ERROR);
+				Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
                 $this->exitSmcServer(SIGKILL);
             }
             $statusInfo = $this->getSmcServcerStatus($worker);

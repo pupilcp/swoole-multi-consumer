@@ -18,6 +18,7 @@ class Process
      * Process constructor.
      */
     private $mpid                  = null;
+    private $masterPidFile         = null;
     private $works                 = [];
     private $smcServerStatusTime   = 120; //单位：s
     private $queueStatusTime       = 60; //单位：s
@@ -56,10 +57,22 @@ class Process
 
     private function init()
     {
-        $masterProcessName         = sprintf('smc-server-%s', 'master');
         $this->mpid                = posix_getpid();
         $this->startTime           = time();
         $globalConfig              = Smc::getGlobalConfig()['global'];
+        $masterProcessName         = $globalConfig['masterProcessName'];
+        $masterPidPath             = $globalConfig['logPath'] . DIRECTORY_SEPARATOR . $masterProcessName;
+        if (!is_dir($masterPidPath) || !file_exists($masterPidPath)) {
+            mkdir($masterPidPath, 0755, true);
+        }
+        $this->masterPidFile = $masterPidPath . DIRECTORY_SEPARATOR . 'master.pid';
+        if (is_file($this->masterPidFile)) {
+            $oldmasterPid = file_get_contents($this->masterPidFile);
+            if ($oldmasterPid && is_numeric($oldmasterPid)) {
+                \Swoole\Process::kill($oldmasterPid);
+            }
+        }
+        file_put_contents($this->masterPidFile, $this->mpid);
         $this->checkConfigTime     = $globalConfig['checkConfigTime'] ?? $this->checkConfigTime;
         $this->smcServerStatusTime = $globalConfig['smcServerStatusTime'] ?? $this->smcServerStatusTime;
         $this->queueStatusTime     = $globalConfig['queueStatusTime'] ?? $this->queueStatusTime;
@@ -172,6 +185,9 @@ class Process
                 if ($this->timerPid && \Swoole\Process::kill($this->timerPid, 0)) {
                     \Swoole\Process::kill($this->timerPid, $signo);
                 }
+                if(is_file($this->masterPidFile) && file_exists($this->masterPidFile)){
+                	unlink($this->masterPidFile);
+				}
                 $msg = sprintf('smc-server接收到信号：%s，master主进程：%d退出' . PHP_EOL, $signo, $this->mpid);
                 Smc::$logger->log($msg);
                 if (class_exists(\Swoole\ExitException::class)) {
@@ -266,7 +282,11 @@ class Process
     {
         $process = new \Swoole\Process(function (\Swoole\Process $worker) {
             $this->renameProcessName('smc-check-worker');
-            $this->checkQueuesStatus($worker);
+            $enableCheckQueueStatus = false;
+            if (isset(Smc::getGlobalConfig()['global']['enableCheckQueueStatus']) && Smc::getGlobalConfig()['global']['enableCheckQueueStatus']) {
+                $enableCheckQueueStatus = true;
+            }
+            $enableCheckQueueStatus && $this->checkQueuesStatus($worker);
             $this->getSmcServerInfo($worker);
             $this->checkConfigStatus();
         });
@@ -382,9 +402,9 @@ class Process
     {
         \Swoole\Timer::tick($this->smcServerStatusTime * 1000, function ($timerId, $worker) {
             if (!$this->checkMasterProcess()) {
-            	$msg = sprintf('【Error】检测到主进程：%d不存在，强制退出子进程', $this->mpid);
+                $msg = sprintf('【Error】检测到主进程：%d不存在，强制退出子进程', $this->mpid);
                 Smc::$logger->log($msg, Logger::LEVEL_ERROR);
-				Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
+                Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
                 $this->exitSmcServer(SIGKILL);
             }
             $statusInfo = $this->getSmcServcerStatus($worker);

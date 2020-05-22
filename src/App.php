@@ -34,6 +34,7 @@ class App
     {
         //定时器默认创建协程，由于协程内不能fork子进程，关闭协程
         swoole_async_set(['enable_coroutine' => false]);
+		\Swoole\Process::daemon();
         $process = new Process();
         $process->run();
     }
@@ -48,9 +49,15 @@ class App
     private function init($globalConfig)
     {
         try {
+			if (!isset($globalConfig['global']['logPath']) || empty($globalConfig['global']['logPath'])) {
+				throw new \Exception('logPath配置缺失', 10006);
+			}
             //1.初始化日志组件
-            Smc::$logger = Logger::getLogger($globalConfig['global']['logPath'] ?? null, $globalConfig['global']['logFileName'] ?? null);
+            Smc::$logger = Logger::getLogger($globalConfig['global']['logPath'],'smc-server.log');
             //2.初始化配置
+			if (!isset($globalConfig['global']['masterProcessName']) || empty($globalConfig['global']['masterProcessName'])) {
+				throw new \Exception('masterProcessName配置缺失', 10005);
+			}
             if (!isset($globalConfig['global']['queueCfgCallback']) || empty($globalConfig['global']['queueCfgCallback'])) {
                 throw new \Exception('queueCfgCallback配置缺失', 10001);
             }

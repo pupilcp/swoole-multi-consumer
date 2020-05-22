@@ -41,11 +41,12 @@ define('SMC_MESSAGE_DRIVER', SMC_AMQP_CONSUME); //消息驱动， 1.0.0暂时仅
 return [
     //通用配置
     'global' => [
+        'masterProcessName'   => 'smc-server-master', //主进程名称，如果需要启动多个smc-server的话，必须设置不同的主进程名称
         'enableNotice'        => true, //是否开启预警通知
         'dingDingToken'       => '钉钉机器人token', //钉钉机器人token
         'queueCfgCallback'    => ['\Pupilcp\Service\Test', 'loadQueueConfig'], //必填，smc-server会检测此回调方法，实现队列配置热加载，格式：call_user_func_array方法的第一个参数
-        'logPath'             => '日志文件目录', //可选，日志文件路径，最好自定义
-        'logFileName'         => '日志文件名称', //可选，
+        'logPath'             => '日志文件目录',
+        'enableCheckQueueStatus' => true, //可选，是否开启定时监测消息队列数据积压的状态，自动伸缩消费者，默认为false，关闭
         //'smcServerStatusTime' => 120, //可选，定时监测smc-server状态的时间间隔，默认为120，单位：秒
         //'queueStatusTime'     => 60, //可选，定时监测消息队列数据积压的状态，自动伸缩消费者，默认为60，单位：秒
         //'checkConfigTime'     => 60, //可选，定时监测队列相关配置状态的时间间隔，结合queueCfgCallback实现热加载，默认为60，单位：秒

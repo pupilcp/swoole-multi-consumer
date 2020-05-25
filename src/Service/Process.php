@@ -15,6 +15,7 @@ use Pupilcp\Smc;
 class Process
 {
     const MASTER_EXIT = 'EXIT';
+    const MASTER_RE_INIT = 'RE_INIT';
     /**
      * Process constructor.
      */
@@ -229,7 +230,9 @@ class Process
         //重启消费者子进程
         \Swoole\Process::signal(SIGUSR1, function ($signo) {
             Smc::$logger->log('【系统提示】接收到系统命令，重启消费者子进程');
+			$this->masterStatus = self::MASTER_RE_INIT;
             $this->exitSmcServer($signo, false);
+			$this->masterStatus = null;
             $this->initConsumers();
         });
         //重新注册定时器
@@ -259,14 +262,14 @@ class Process
     {
         $pid       = $ret['pid'];
         $queueName = $this->cleanWorkerPid($pid);
-        if (false !== $queueName && self::MASTER_EXIT != $this->masterStatus) {
+        if (false !== $queueName && self::MASTER_EXIT != $this->masterStatus && self::MASTER_RE_INIT != $this->masterStatus) {
             $newPid = $this->createProcess(Smc::getConfig()['queues'][$queueName]);
             Smc::$logger->log("rebootProcess: {$newPid} Done" . PHP_EOL);
             sleep(3);
 
             return true;
         }
-        throw new \Exception('rebootProcess Error: no pid');
+		Smc::$logger->log('rebootProcess Error: no pid');
     }
 
     /**
@@ -397,7 +400,9 @@ class Process
                     Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
                     //配置发生变化，重新加载配置，并重启子进程
                     Smc::setConfigHash($configJson);
+					$this->masterStatus = self::MASTER_RE_INIT;
                     $this->exitSmcServer(SIGTERM, false);
+					$this->masterStatus = null;
                     $this->initConsumers();
                 }
             }

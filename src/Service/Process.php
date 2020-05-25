@@ -14,6 +14,7 @@ use Pupilcp\Smc;
 
 class Process
 {
+    const MASTER_EXIT = 'EXIT';
     /**
      * Process constructor.
      */
@@ -28,6 +29,8 @@ class Process
     private $maxConsumerNum        = 20;
     private $startTime             = null;
     private $timerPid              = null;
+
+    private $masterStatus = null;
 
     public function __construct()
     {
@@ -68,7 +71,7 @@ class Process
         $this->masterPidFile = $masterPidPath . DIRECTORY_SEPARATOR . 'master.pid';
         if (is_file($this->masterPidFile)) {
             $oldmasterPid = file_get_contents($this->masterPidFile);
-            if ($oldmasterPid && is_numeric($oldmasterPid)) {
+            if ($oldmasterPid && is_numeric($oldmasterPid) && \Swoole\Process::kill($oldmasterPid, 0)) {
                 \Swoole\Process::kill($oldmasterPid);
             }
         }
@@ -147,6 +150,15 @@ class Process
      */
     private function cleanWorkerPid($pid)
     {
+        if (!empty($this->works)) {
+            foreach ($this->works as $queueName => $pidArr) {
+                if (in_array($pid, $pidArr)) {
+                    $index = array_search($pid, $pidArr);
+                    unset($this->works[$queueName][$index]);
+                    break;
+                }
+            }
+        }
         if (!empty(Smc::getConfig()['queues'])) {
             foreach (Smc::getConfig()['queues'] as $name => $queue) {
                 if (false !== Smc::deleteWorker($name, $pid)) {
@@ -169,6 +181,9 @@ class Process
         if (!empty(Smc::getConfig()['queues'])) {
             foreach (Smc::getConfig()['queues'] as $name => $queue) {
                 $pidArr = Smc::getWorkers($name);
+                if (empty($pidArr)) {
+                    $pidArr = $this->works[$name] ?? [];
+                }
                 if (count($pidArr)) {
                     foreach ($pidArr as $pid) {
                         if ($pid && \Swoole\Process::kill($pid, 0)) {
@@ -179,22 +194,19 @@ class Process
                     Smc::cleanWorkers($name);
                 }
             }
+            $this->works = null;
             if ($exit) {
                 //主进程退出，清空配置缓存
                 Smc::delConfigHash();
                 if ($this->timerPid && \Swoole\Process::kill($this->timerPid, 0)) {
                     \Swoole\Process::kill($this->timerPid, $signo);
                 }
-                if(is_file($this->masterPidFile) && file_exists($this->masterPidFile)){
-                	unlink($this->masterPidFile);
-				}
+                if (is_file($this->masterPidFile) && file_exists($this->masterPidFile)) {
+                    unlink($this->masterPidFile);
+                }
                 $msg = sprintf('smc-server接收到信号：%s，master主进程：%d退出' . PHP_EOL, $signo, $this->mpid);
                 Smc::$logger->log($msg);
-                if (class_exists(\Swoole\ExitException::class)) {
-                    throw new \Swoole\ExitException($msg);
-                } else {
-                    exit();
-                }
+                die($msg);
             }
         }
     }
@@ -206,10 +218,12 @@ class Process
     {
         //强行退出主进程
         \Swoole\Process::signal(SIGTERM, function ($signo) {
+            $this->masterStatus = self::MASTER_EXIT;
             $this->exitSmcServer($signo);
         });
         //强行退出主进程
         \Swoole\Process::signal(SIGKILL, function ($signo) {
+            $this->masterStatus = self::MASTER_EXIT;
             $this->exitSmcServer($signo);
         });
         //重启消费者子进程
@@ -245,9 +259,8 @@ class Process
     {
         $pid       = $ret['pid'];
         $queueName = $this->cleanWorkerPid($pid);
-        if (false !== $queueName) {
+        if (false !== $queueName && self::MASTER_EXIT != $this->masterStatus) {
             $newPid = $this->createProcess(Smc::getConfig()['queues'][$queueName]);
-            Smc::addWorker($queueName, $newPid);
             Smc::$logger->log("rebootProcess: {$newPid} Done" . PHP_EOL);
             sleep(3);
 
@@ -265,7 +278,7 @@ class Process
             $ret = \Swoole\Process::wait(false);
             if ($ret) {
                 try {
-                    $this->cleanWorkerPid($ret['pid']);
+                    $this->rebootProcess($ret);
                 } catch (\Throwable $e) {
                     Smc::$logger->log($e->getMessage() . $e->getTraceAsString(), Logger::LEVEL_ERROR);
                 }

@@ -26,7 +26,7 @@ return [
             'minConsumerNum' => 2,  //最小消费者数量
             'maxConsumerNum' => 3,  //最大消费者数量，系统限制最大20
             'warningNum'     => 10000, //达到预警的消息数量，请合理设置，建议不少于1000
-            'callback'       => ['\Pupilcp\Service\Test', 'messageCallback'], //消息回调方法，进行消息处理，格式：call_user_func_array方法的第一个参数
+			'callback'       => ['hello', 't'], //程序执行job，[command,action]
         ],
         'queue_name1' => [
             'queueName'      => 'queue_name1',
@@ -36,7 +36,7 @@ return [
             'minConsumerNum' => 1,
             'maxConsumerNum' => 3,
             'warningNum'     => 10000,
-            'callback'       => ['\Pupilcp\Service\Test', 'messageCallback'],
+			'callback'       => ['hello', 't'], //程序执行job，[command,action]
         ],
     ],
 ];

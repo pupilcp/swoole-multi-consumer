@@ -18,7 +18,7 @@ class AmqpLib
     /**
      * @var AMQPConnection
      */
-    protected static $ampqConnection;
+    public static $ampqConnection;
 
     protected $prefetchCount = 10;
 

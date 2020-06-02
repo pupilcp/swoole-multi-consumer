@@ -13,7 +13,7 @@ use Pupilcp\Service\Process;
 
 class App
 {
-	const SMC_SERVER_VERSION = '1.0.3';
+    const SMC_SERVER_VERSION = '1.0.9';
 
     /**
      * App constructor.
@@ -24,6 +24,13 @@ class App
      */
     public function __construct($globalConfig)
     {
+        $params                            = getopt('s:d:');
+        $globalConfig['global']['command'] = $params['s'] ?? 'start';
+        $daemon                            = false;
+        if (!isset($params['d']) || (isset($params['d']) && 'true' == $params['d'])) {
+			$daemon = true;
+        }
+        $globalConfig['global']['daemon'] = $daemon;
         $this->init($globalConfig);
     }
 
@@ -34,9 +41,27 @@ class App
     {
         //定时器默认创建协程，由于协程内不能fork子进程，关闭协程
         swoole_async_set(['enable_coroutine' => false]);
-		\Swoole\Process::daemon();
+        $command = Smc::getGlobalConfig()['global']['command'];
+        'start' == $command && Smc::getGlobalConfig()['global']['daemon'] && \Swoole\Process::daemon();
         $process = new Process();
-        $process->run();
+        switch ($command) {
+            case 'start':
+                $process->start();
+                break;
+            case 'stop':
+                $process->stop();
+                break;
+            case 'restart':
+                $process->restart();
+                break;
+            case 'status':
+                $process->getStatus();
+                break;
+            case 'help':
+                printf('Options -s: start|restart|stop|status|help' . PHP_EOL . 'Options -d: false|true, 是否daemon运行' . PHP_EOL);
+                break;
+            default: break;
+        }
     }
 
     /**
@@ -49,17 +74,14 @@ class App
     private function init($globalConfig)
     {
         try {
-			if (!isset($globalConfig['global']['logPath']) || empty($globalConfig['global']['logPath'])) {
-				throw new \Exception('logPath配置缺失', 10006);
-			}
+            if (!isset($globalConfig['global']['logPath']) || empty($globalConfig['global']['logPath'])) {
+                throw new \Exception('logPath配置缺失', 10006);
+            }
             //1.初始化日志组件
-            Smc::$logger = Logger::getLogger($globalConfig['global']['logPath'],'smc-server.log');
+            Smc::$logger = Logger::getLogger($globalConfig['global']['logPath'], 'smc-server.log');
             //2.初始化配置
-			if (!isset($globalConfig['global']['masterProcessName']) || empty($globalConfig['global']['masterProcessName'])) {
-				throw new \Exception('masterProcessName配置缺失', 10005);
-			}
-            if (!isset($globalConfig['global']['queueCfgCallback']) || empty($globalConfig['global']['queueCfgCallback'])) {
-                throw new \Exception('queueCfgCallback配置缺失', 10001);
+            if (!isset($globalConfig['global']['masterProcessName']) || empty($globalConfig['global']['masterProcessName'])) {
+                throw new \Exception('masterProcessName配置缺失', 10005);
             }
             if ($globalConfig['global']['enableNotice'] && empty($globalConfig['global']['dingDingToken'])) {
                 throw new \Exception('dingDingToken配置缺失', 10002);
@@ -71,11 +93,18 @@ class App
                 throw new \Exception('请完善redis配置', 10004);
             }
             $globalConfig['global']['uniqueServiceId'] = uniqid() . rand(100000, 999999); //增加启动服务的唯一标识，避免启动多个相同服务导致异常
+			if (isset($globalConfig['global']['queueCfgCallback']) && !empty($globalConfig['global']['queueCfgCallback'])) {
+				$amqpConfig = call_user_func_array($globalConfig['global']['queueCfgCallback'], []);
+			}else if(isset($globalConfig['amqp'])){
+				$amqpConfig = $globalConfig['amqp'];
+				unset($globalConfig['amqp']);
+			}else{
+				throw new \Exception('queueCfgCallback配置缺失', 10001);
+			}
             Smc::setGlobalConfig($globalConfig);
             Smc::$logger->log('globalConfig: ' . json_encode($globalConfig));
-            $config = call_user_func_array($globalConfig['global']['queueCfgCallback'], []);
-            $this->verifyQueueConfig($config);
-            Smc::setConfig($config);
+            $this->verifyQueueConfig($amqpConfig);
+            Smc::setConfig($amqpConfig);
         } catch (\Throwable $e) {
             Smc::$logger->log($e->getMessage() . $e->getTraceAsString(), Logger::LEVEL_ERROR);
             throw $e;

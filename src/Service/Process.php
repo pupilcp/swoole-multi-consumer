@@ -9,13 +9,12 @@
 namespace Pupilcp\Service;
 
 use Pupilcp\App;
+use Pupilcp\Library\AmqpLib;
 use Pupilcp\Log\Logger;
 use Pupilcp\Smc;
 
 class Process
 {
-    const MASTER_EXIT = 'EXIT';
-    const MASTER_RE_INIT = 'RE_INIT';
     /**
      * Process constructor.
      */
@@ -30,22 +29,113 @@ class Process
     private $maxConsumerNum        = 20;
     private $startTime             = null;
     private $timerPid              = null;
+    private $masterPath            = null;
+    private $serverStatusFile      = 'smc-server.status';
 
-    private $masterStatus = null;
+    private $rebootChildProcessFlag = 'rebootChildProcessFlag';
+    private $swooleTable            = null;
 
     public function __construct()
     {
-        $this->init();
+        $globalConfig              = Smc::getGlobalConfig()['global'];
+        $masterProcessName         = $globalConfig['masterProcessName'];
+        $masterPath                = $globalConfig['logPath'] . DIRECTORY_SEPARATOR . $masterProcessName;
+        if (!is_dir($masterPath) || !file_exists($masterPath)) {
+            mkdir($masterPath, 0755, true);
+        }
+        $this->masterPidFile = $masterPath . DIRECTORY_SEPARATOR . 'master.pid';
+        $this->masterPath    = $masterPath;
     }
 
     /**
-     * 启动多进程.
+     * 启动服务.
      */
-    public function run()
+    public function start()
     {
-        $this->initConsumers();
-        $this->registerSignal();
-        $this->registerTimer();
+        try {
+            $this->init();
+            $this->createSwooleTable();
+            $this->initConsumers();
+            $this->registerSignal();
+            $this->registerTimer();
+        } catch (\Throwable $e) {
+            printf($e->getMessage());
+            Smc::$logger->log($e->getMessage(), Logger::LEVEL_INFO);
+        }
+    }
+
+    /**
+     * 停止服务.
+     */
+    public function stop()
+    {
+        $mpid = null;
+        if (file_exists($this->masterPidFile)) {
+            $mpid = (int) file_get_contents($this->masterPidFile);
+        }
+        if (empty($mpid)) {
+            exit('smc-server服务未启动' . PHP_EOL);
+        }
+        if (\Swoole\Process::kill($mpid, 0)) {
+            \Swoole\Process::kill($mpid, SIGTERM);
+        } else {
+            exit('smc-server服务未启动' . PHP_EOL);
+        }
+    }
+
+    /**
+     * 重启多进程.
+     */
+    public function restart()
+    {
+        $mpid = null;
+        if (file_exists($this->masterPidFile)) {
+            $mpid = (int) file_get_contents($this->masterPidFile);
+        }
+        if (empty($mpid)) {
+            exit('smc-server服务未启动' . PHP_EOL);
+        }
+        if (\Swoole\Process::kill($mpid, 0)) {
+            \Swoole\Process::kill($mpid, SIGUSR1);
+        } else {
+            exit('smc-server服务未启动' . PHP_EOL);
+        }
+    }
+
+    /**
+     * 查询状态.
+     */
+    public function getStatus()
+    {
+        $mpid = null;
+        if (file_exists($this->masterPidFile)) {
+            $mpid = (int) file_get_contents($this->masterPidFile);
+        }
+        if (empty($mpid)) {
+            exit('smc-server服务未启动' . PHP_EOL);
+        }
+        if (\Swoole\Process::kill($mpid, 0)) {
+        	$statusLog = $this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile;
+        	$content = null;
+        	if(is_file($statusLog)){
+				$content = file_get_contents($statusLog);
+			}
+			$smcServerStatusTime = Smc::getGlobalConfig()['global']['smcServerStatusTime'];
+            printf($content ? $content : (($smcServerStatusTime ? ('暂无状态数据，请在'.$smcServerStatusTime.'秒后再查看') : '请开启定时监测smc-server状态[配置：smcServerStatusTime]' )));
+        } else {
+            exit('smc-server服务未启动' . PHP_EOL);
+        }
+    }
+
+    /**
+     * 创建共享内存.
+     */
+    private function createSwooleTable()
+    {
+        $table = new \Swoole\Table(1024);
+        $table->column('reboot', \Swoole\Table::TYPE_INT, 1);
+        $table->create();
+        $this->swooleTable = $table;
     }
 
     /**
@@ -61,27 +151,25 @@ class Process
 
     private function init()
     {
-        $this->mpid                = posix_getpid();
-        $this->startTime           = time();
-        $globalConfig              = Smc::getGlobalConfig()['global'];
-        $masterProcessName         = $globalConfig['masterProcessName'];
-        $masterPidPath             = $globalConfig['logPath'] . DIRECTORY_SEPARATOR . $masterProcessName;
-        if (!is_dir($masterPidPath) || !file_exists($masterPidPath)) {
-            mkdir($masterPidPath, 0755, true);
-        }
-        $this->masterPidFile = $masterPidPath . DIRECTORY_SEPARATOR . 'master.pid';
+        $globalConfig = Smc::getGlobalConfig()['global'];
         if (is_file($this->masterPidFile)) {
             $oldmasterPid = file_get_contents($this->masterPidFile);
             if ($oldmasterPid && is_numeric($oldmasterPid) && \Swoole\Process::kill($oldmasterPid, 0)) {
-                \Swoole\Process::kill($oldmasterPid);
+                throw new \Exception('smc-server服务正在运行', 10001);
+                //\Swoole\Process::kill($oldmasterPid);
             }
         }
+        if(is_file($this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile)){
+			file_put_contents($this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile,'');
+		}
+        $this->mpid                = posix_getpid();
+        $this->startTime           = time();
         file_put_contents($this->masterPidFile, $this->mpid);
         $this->checkConfigTime     = $globalConfig['checkConfigTime'] ?? $this->checkConfigTime;
         $this->smcServerStatusTime = $globalConfig['smcServerStatusTime'] ?? $this->smcServerStatusTime;
         $this->queueStatusTime     = $globalConfig['queueStatusTime'] ?? $this->queueStatusTime;
-        $this->renameProcessName($masterProcessName);
-        $this->masterProcessName   = $masterProcessName;
+        $this->renameProcessName($globalConfig['masterProcessName']);
+        $this->masterProcessName   = $globalConfig['masterProcessName'];
         Smc::$logger->log('smc-server start, master pid: ' . $this->mpid . PHP_EOL);
     }
 
@@ -129,9 +217,24 @@ class Process
             $this->renameProcessName(sprintf('smc-worker-%s', $queueConf['queueName']));
             $this->checkMpid($worker);
             try {
-                $consumer = new Consumer(Smc::selectDriver($queueConf, SMC_MESSAGE_DRIVER));
-                $consumer->consume($queueConf['callback'], $queueConf ?? null);
+                $config = Smc::getConfig()['connection'];
+                $ampq = AmqpLib::getInstance($config['host'], $config['port'], $config['user'], $config['pass'], $config['vhost'], $config['exchange'], $config['timeout'] ?? null);
+                $channel = new \AMQPChannel($ampq::$ampqConnection);
+                $channel->setPrefetchCount($queueConf['prefetchCount'] ?? 10);
+                $queue = new \AMQPQueue($channel);
+                $queue->setName($queueConf['queueName'] ?? null);
+                $queue->bind(Smc::getConfig()['connection']['exchange'], $queueConf['routeKey'] ?? null);
+                $baseApplication = '\Pupilcp\Base\BaseApplication';
+                if (isset(Smc::getGlobalConfig()['global']['baseApplication']) && class_exists(Smc::getGlobalConfig()['global']['baseApplication'])) {
+                    $baseApplication = Smc::getGlobalConfig()['global']['baseApplication'];
+                }
+                $baseApp = new $baseApplication();
+                $queue->consume(function (\AMQPEnvelope $envelope, \AMQPQueue $queue) use ($baseApp, $queueConf) {
+                    $baseApp->run(['command' => $queueConf['callback'][0], 'action' => $queueConf['callback'][1], 'msg' => $envelope->getBody()]);
+                    $queue->ack($envelope->getDeliveryTag());
+                });
             } catch (\Throwable $e) {
+                $this->swooleTable->set($this->rebootChildProcessFlag, ['reboot' => 1]);
                 Smc::$logger->log($e->getMessage() . $e->getTraceAsString(), Logger::LEVEL_ERROR);
             }
         }, false, false);
@@ -219,20 +322,17 @@ class Process
     {
         //强行退出主进程
         \Swoole\Process::signal(SIGTERM, function ($signo) {
-            $this->masterStatus = self::MASTER_EXIT;
             $this->exitSmcServer($signo);
         });
         //强行退出主进程
         \Swoole\Process::signal(SIGKILL, function ($signo) {
-            $this->masterStatus = self::MASTER_EXIT;
             $this->exitSmcServer($signo);
         });
         //重启消费者子进程
         \Swoole\Process::signal(SIGUSR1, function ($signo) {
             Smc::$logger->log('【系统提示】接收到系统命令，重启消费者子进程');
-			$this->masterStatus = self::MASTER_RE_INIT;
+            $this->swooleTable->set($this->rebootChildProcessFlag, ['reboot' => 0]);
             $this->exitSmcServer($signo, false);
-			$this->masterStatus = null;
             $this->initConsumers();
         });
         //重新注册定时器
@@ -262,14 +362,15 @@ class Process
     {
         $pid       = $ret['pid'];
         $queueName = $this->cleanWorkerPid($pid);
-        if (false !== $queueName && self::MASTER_EXIT != $this->masterStatus && self::MASTER_RE_INIT != $this->masterStatus) {
+        $rebootRow = $this->swooleTable->get($this->rebootChildProcessFlag);
+        if (false !== $queueName && isset($rebootRow['reboot']) && 1 == $rebootRow['reboot']) {
             $newPid = $this->createProcess(Smc::getConfig()['queues'][$queueName]);
             Smc::$logger->log("rebootProcess: {$newPid} Done" . PHP_EOL);
             sleep(3);
 
             return true;
         }
-		Smc::$logger->log('rebootProcess Error: no pid');
+        Smc::$logger->log('rebootProcess Error: no pid');
     }
 
     /**
@@ -298,13 +399,9 @@ class Process
     {
         $process = new \Swoole\Process(function (\Swoole\Process $worker) {
             $this->renameProcessName('smc-check-worker');
-            $enableCheckQueueStatus = false;
-            if (isset(Smc::getGlobalConfig()['global']['enableCheckQueueStatus']) && Smc::getGlobalConfig()['global']['enableCheckQueueStatus']) {
-                $enableCheckQueueStatus = true;
-            }
-            $enableCheckQueueStatus && $this->checkQueuesStatus($worker);
-            $this->getSmcServerInfo($worker);
-            $this->checkConfigStatus();
+            isset(Smc::getGlobalConfig()['global']['queueStatusTime']) && null !== Smc::getGlobalConfig()['global']['queueStatusTime'] && $this->checkQueuesStatus($worker);
+            isset(Smc::getGlobalConfig()['global']['smcServerStatusTime']) && null !== Smc::getGlobalConfig()['global']['smcServerStatusTime'] && $this->getSmcServerInfo($worker);
+            isset(Smc::getGlobalConfig()['global']['checkConfigTime']) && null !== Smc::getGlobalConfig()['global']['checkConfigTime'] && $this->checkConfigStatus();
         });
         $this->timerPid = $process->start();
         if (strcmp(SWOOLE_VERSION, '4.4.0') > 0) {
@@ -400,10 +497,7 @@ class Process
                     Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
                     //配置发生变化，重新加载配置，并重启子进程
                     Smc::setConfigHash($configJson);
-					$this->masterStatus = self::MASTER_RE_INIT;
-                    $this->exitSmcServer(SIGTERM, false);
-					$this->masterStatus = null;
-                    $this->initConsumers();
+                    \Swoole\Process::kill($this->mpid, SIGUSR1);
                 }
             }
         });
@@ -426,6 +520,7 @@ class Process
                 $this->exitSmcServer(SIGKILL);
             }
             $statusInfo = $this->getSmcServcerStatus($worker);
+            file_put_contents($this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile, $statusInfo);
             Smc::$logger->log($statusInfo);
         }, $worker);
     }
@@ -437,7 +532,7 @@ class Process
      *
      * @return string
      */
-    private function getSmcServcerStatus($worker)
+    private function getSmcServcerStatus($worker = null)
     {
         $statusInfo  = PHP_EOL;
         $statusInfo .= 'AppName: Swoole-Multi-Consumer Version: ' . App::SMC_SERVER_VERSION . PHP_EOL;
@@ -445,7 +540,9 @@ class Process
         $statusInfo .= Utils::getSysLoadAvg() . '   Memory Used:' . Utils::getServerMemoryUsage() . PHP_EOL;
         $statusInfo .= 'StartTime : ' . date('Y-m-d H:i:s', $this->startTime) . '   Run ' . floor((time() - $this->startTime) / (24 * 60 * 60)) . ' Days ' . floor(((time() - $this->startTime) % (24 * 60 * 60)) / (60 * 60)) . ' Hours ' . floor(((time() - $this->startTime) % 3600) / 60) . ' Minutes ' . PHP_EOL;
         $statusInfo .= '|-- Master: ' . $this->masterProcessName . ' PID: ' . $this->mpid . PHP_EOL;
-        $statusInfo .= '    |-- Smc Check Worker PID: ' . $worker->pid . PHP_EOL;
+        if ($worker) {
+            $statusInfo .= '    |-- Smc Check Worker PID: ' . $worker->pid . PHP_EOL;
+        }
         if (Smc::getConfig()['queues']) {
             foreach (Smc::getConfig()['queues'] as $k => $queue) {
                 $workers = Smc::getWorkers($k);

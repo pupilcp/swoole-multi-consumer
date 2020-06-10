@@ -18,6 +18,7 @@ return [
         'dingDingToken'          => '钉钉机器人token', //钉钉机器人token
         'queueCfgCallback'       => ['\Pupilcp\Service\Test', 'loadQueueConfig'], //系统会检测此回调方法，实现队列配置热加载，格式：call_user_func_array方法的第一个参数，如果不使用热加载，可以使用以下的 amqp 配置的示例
         'logPath'                => '日志文件目录', //日志文件路径
+		'childProcessMaxExecTime'  => 86400, //子进程最大执行时间，避免运行时间过长，释放内存，单位：秒
         //'baseApplication'        => null, //框架执行命令行，默认为yii1：\Pupilcp\Base\BaseApplication，其它框架请继承\Pupilcp\Base\BaseApplication
         //'smcServerStatusTime' => 120, //可选，定时监测smc-server状态的时间间隔，默认为null，不开启
         //'queueStatusTime'     => 60, //可选，定时监测消息队列数据积压的状态，自动伸缩消费者，默认为null，不开启

@@ -115,13 +115,13 @@ class Process
             exit('smc-server服务未启动' . PHP_EOL);
         }
         if (\Swoole\Process::kill($mpid, 0)) {
-        	$statusLog = $this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile;
-        	$content = null;
-        	if(is_file($statusLog)){
-				$content = file_get_contents($statusLog);
-			}
-			$smcServerStatusTime = Smc::getGlobalConfig()['global']['smcServerStatusTime'];
-            printf($content ? $content : (($smcServerStatusTime ? ('暂无状态数据，请在'.$smcServerStatusTime.'秒后再查看') : '请开启定时监测smc-server状态[配置：smcServerStatusTime]' )));
+            $statusLog = $this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile;
+            $content   = null;
+            if (is_file($statusLog)) {
+                $content = file_get_contents($statusLog);
+            }
+            $smcServerStatusTime = Smc::getGlobalConfig()['global']['smcServerStatusTime'];
+            printf($content ? $content : (($smcServerStatusTime ? ('暂无状态数据，请在' . $smcServerStatusTime . '秒后再查看') : '请开启定时监测smc-server状态[配置：smcServerStatusTime]')));
         } else {
             exit('smc-server服务未启动' . PHP_EOL);
         }
@@ -159,9 +159,9 @@ class Process
                 //\Swoole\Process::kill($oldmasterPid);
             }
         }
-        if(is_file($this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile)){
-			file_put_contents($this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile,'');
-		}
+        if (is_file($this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile)) {
+            file_put_contents($this->masterPath . DIRECTORY_SEPARATOR . $this->serverStatusFile, '');
+        }
         $this->mpid                = posix_getpid();
         $this->startTime           = time();
         file_put_contents($this->masterPidFile, $this->mpid);
@@ -175,18 +175,22 @@ class Process
 
     /**
      * 初始化消费者.
+     *
+     * @param null|mixed $queueName
      */
-    private function initConsumers()
+    private function initConsumers($queueName = null)
     {
         $queues = Smc::getConfig()['queues'] ?? [];
         if (!empty($queues)) {
             foreach ($queues as $queue) {
-                //清空队列的worker记录
-                Smc::cleanWorkers($queue['queueName']);
-                $minConsumerNum = (int) $queue['minConsumerNum'];
-                $minConsumerNum = $minConsumerNum <= 0 ? $this->minConsumerNum : $minConsumerNum;
-                for ($i = 1; $i <= $minConsumerNum; $i++) {
-                    $this->createProcess($queue);
+                if (null === $queueName || (null !== $queueName && $queueName == $queue['queueName'])) {
+                    //清空队列的worker记录
+                    Smc::cleanWorkers($queue['queueName']);
+                    $minConsumerNum = (int) $queue['minConsumerNum'];
+                    $minConsumerNum = $minConsumerNum <= 0 ? $this->minConsumerNum : $minConsumerNum;
+                    for ($i = 1; $i <= $minConsumerNum; $i++) {
+                        $this->createProcess($queue);
+                    }
                 }
             }
         }
@@ -228,10 +232,18 @@ class Process
                 if (isset(Smc::getGlobalConfig()['global']['baseApplication']) && class_exists(Smc::getGlobalConfig()['global']['baseApplication'])) {
                     $baseApplication = Smc::getGlobalConfig()['global']['baseApplication'];
                 }
-                $baseApp = new $baseApplication();
-                $queue->consume(function (\AMQPEnvelope $envelope, \AMQPQueue $queue) use ($baseApp, $queueConf) {
+                $baseApp   = new $baseApplication();
+                $startTime = time();
+                $queue->consume(function (\AMQPEnvelope $envelope, \AMQPQueue $queue) use ($baseApp, $queueConf, &$startTime, $worker) {
                     $baseApp->run(['command' => $queueConf['callback'][0], 'action' => $queueConf['callback'][1], 'msg' => $envelope->getBody()]);
                     $queue->ack($envelope->getDeliveryTag());
+                    //子进程执行时间超过设定时间，退出并重启
+                    if (isset(Smc::getGlobalConfig()['global']['childProcessMaxExecTime']) && Smc::getGlobalConfig()['global']['childProcessMaxExecTime'] && (time() - $startTime > (int) Smc::getGlobalConfig()['global']['childProcessMaxExecTime'])) {
+						$startTime = time();
+                        $msg = '队列[' . $queueConf['queueName'] . ']-子进程[' . $worker->pid . ']执行时间超过设定时间，退出并重启';
+                        Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
+                        throw new \Exception($msg);
+                    }
                 });
             } catch (\Throwable $e) {
                 $this->swooleTable->set($this->rebootChildProcessFlag, ['reboot' => 1]);
@@ -552,6 +564,11 @@ class Process
                         $statusInfo .= '        |-- Smc Worker PID:  ' . $pid . PHP_EOL;
                     }
                 } else {
+                    //消费者为空，需要重启
+                    $msg = '队列[' . $k . ']无消费者，重新初始化子进程';
+                    Smc::$logger->log($msg, Logger::LEVEL_ERROR);
+                    Notice::getInstance()->notice(['title' => 'smc-server预警提示', 'content' => $msg]);
+                    $this->initConsumers($k);
                     $statusInfo .= '        |-- None' . PHP_EOL;
                 }
             }
